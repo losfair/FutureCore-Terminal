@@ -5,17 +5,10 @@
 #include "types.h"
 #include "vm_instructions.h"
 
-struct VM {
-    struct Context *ctx;
-    size_t mem_size;
-    u16 regs[16];
-    u8 *mem;
-    u8 *ip;
-};
-
 void tc_vm_init(struct Context *ctx, struct VM *vm, size_t mem_size) {
     size_t i;
     vm -> ctx = ctx;
+    vm -> task_id = 0;
     vm -> mem_size = mem_size;
     vm -> mem = (u8 *) ctx -> malloc(mem_size);
     for(i = 0; i < mem_size; i++) {
@@ -50,13 +43,13 @@ u8 tc_vm_execute_once(struct VM *vm) {
         
         case VMI_LOAD:
             vm -> ip++;
-            vm -> regs[*(vm -> ip)] = vm -> mem[*(u16 *)(vm -> ip + 1)];
+            vm -> regs[*(vm -> ip)] = *(u16 *)&vm -> mem[*(u16 *)(vm -> ip + 1)];
             vm -> ip += 3;
             break;
         
         case VMI_STORE:
             vm -> ip++;
-            vm -> mem[*(u16 *)(vm -> ip + 1)] = vm -> regs[*(vm -> ip)];
+            *(u16 *)&vm -> mem[*(u16 *)(vm -> ip + 1)] = vm -> regs[*(vm -> ip)];
             vm -> ip += 3;
             break;
         
@@ -134,17 +127,23 @@ u8 tc_vm_execute_once(struct VM *vm) {
 
         case VMI_JMP:
             vm -> ip++;
-            vm -> ip = vm -> mem + vm -> mem[*(u16 *)(vm -> ip)];
+            vm -> ip = vm -> mem + vm -> regs[*(vm -> ip)];
             break;
         
         case VMI_CONDJMP:
             vm -> ip++;
             if(vm -> regs[*(vm -> ip)]) {
                 vm -> ip++;
-                vm -> ip = vm -> mem + vm -> mem[*(u16 *)(vm -> ip)];
+                vm -> ip = vm -> mem + vm -> regs[*(vm -> ip)];
             } else {
-                vm -> ip += 3;
+                vm -> ip += 2;
             }
+            break;
+        
+        case VMI_LOADVAL:
+            vm -> ip++;
+            vm -> regs[*(vm -> ip)] = *(u16 *)(vm -> ip + 1);
+            vm -> ip += 3;
             break;
         
         case VMI_HALT:
@@ -159,6 +158,12 @@ u8 tc_vm_execute_once(struct VM *vm) {
         case VMI_GPIO_DIGITAL_WRITE:
             vm -> ip++;
             vm -> ctx -> gpio_write(vm -> regs[*(vm -> ip)], vm -> regs[*(vm -> ip + 1)]);
+            vm -> ip += 2;
+            break;
+        
+        case VMI_GPIO_SET_PIN_MODE:
+            vm -> ip++;
+            vm -> ctx -> gpio_set_pin_mode(vm -> regs[*(vm -> ip)], vm -> regs[*(vm -> ip + 1)]);
             vm -> ip += 2;
             break;
         

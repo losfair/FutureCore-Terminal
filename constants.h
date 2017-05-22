@@ -7,4 +7,8 @@
 #define DATA_GPIO_READ 0x01
 #define DATA_CODE_EXEC 0x03
 
+#ifndef MAX_VMS
+#define MAX_VMS 16
+#endif
+
 #endif

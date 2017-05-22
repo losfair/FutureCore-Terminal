@@ -20,9 +20,11 @@
 #define VMI_EQ 0x0f
 #define VMI_JMP 0x10
 #define VMI_CONDJMP 0x11
+#define VMI_LOADVAL 0x12
 #define VMI_HALT 0xff
 
 #define VMI_GPIO_DIGITAL_READ 0x80
 #define VMI_GPIO_DIGITAL_WRITE 0x81
+#define VMI_GPIO_SET_PIN_MODE 0x82
 
 #endif

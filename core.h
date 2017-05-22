@@ -48,6 +48,20 @@ static int send_data_packet(struct Context *ctx, u32 id, u32 type, char *data, s
     return ret;
 }
 
+static struct VM * get_vm(struct Context *ctx, size_t code_len) {
+    int i;
+
+    for(i = 0; i < MAX_VMS; i++) {
+        if(ctx -> vms[i] == NULL) {
+            ctx -> vms[i] = (struct VM *) ctx -> malloc(sizeof(struct VM));
+            tc_vm_init(ctx, ctx -> vms[i], code_len);
+            return ctx -> vms[i];
+        }
+    }
+
+    return NULL;
+}
+
 static int control_gpio_read(struct Context *ctx, u32 id, char **raw_packet_ptr, size_t *len_ptr) {
     size_t len = *len_ptr;
 
@@ -93,13 +107,16 @@ static int control_code_exec(struct Context *ctx, u32 id, char **raw_packet_ptr,
     *raw_packet_ptr += code_len;
     len = *len_ptr;
 
-    struct VM vm;
-    tc_vm_init(ctx, &vm, code_len);
-    memcpy(vm.mem, code, code_len);
+    struct VM *vm = get_vm(ctx, code_len);
+    if(!vm) {
+        return -1;
+    }
+
+    memcpy(vm -> mem, code, code_len);
 
 #ifdef DEBUG
     printf("Executing VM\n");
-    printf("Code length: %u\n", code_len);
+    printf("Code length: %lu\n", code_len);
     printf("Bytecode: ");
     for(i = 0; i < code_len; i++) {
         printf("%.2x ", code[i]);
@@ -107,39 +124,42 @@ static int control_code_exec(struct Context *ctx, u32 id, char **raw_packet_ptr,
     printf("\n");
 #endif
 
-    tc_vm_execute(&vm);
-
-#ifdef DEBUG
-    printf("VM execution done\n");
-    printf("Registers:\n");
-    for(i = 0; i < 16; i++) {
-        printf("Register %d: %d\n", i, vm.regs[i]);
-    }
-#endif
-
-    struct CodeExecResponse resp;
-    memcpy(resp.regs, vm.regs, sizeof(u16) * 16);
-
-    tc_vm_destroy(&vm);
-
-#ifdef DEBUG
-    printf("VM destroyed\n");
-#endif
-
-    send_data_packet(ctx, id, DATA_CODE_EXEC, (char *) &resp, sizeof(struct CodeExecResponse));
+    vm -> task_id = id;
 
     return 0;
 }
 
 void tc_init(struct Context *ctx) {
+    int i;
+
     ctx -> state = 0;
     ctx -> key = NULL;
+    ctx -> alive_count = 0;
     ctx -> malloc = (malloc_fn) malloc;
     ctx -> free = (free_fn) free;
     ctx -> gpio_read = NULL;
     ctx -> gpio_write = NULL;
+    ctx -> gpio_set_pin_mode = NULL;
     ctx -> net_write = NULL;
     ctx -> net_write_param = NULL;
+
+    for(i = 0; i < MAX_VMS; i++) {
+        ctx -> vms[i] = NULL;
+    }
+}
+
+void tc_reset(struct Context *ctx) {
+    int i;
+
+    for(i = 0; i < MAX_VMS; i++) {
+        if(ctx -> vms[i] != NULL) {
+            tc_vm_destroy(ctx -> vms[i]);
+            ctx -> free((char *) ctx -> vms[i]);
+            ctx -> vms[i] = NULL;
+        }
+    }
+
+    tc_init(ctx);
 }
 
 int tc_start(struct Context *ctx) {
@@ -149,6 +169,33 @@ int tc_start(struct Context *ctx) {
     ctx -> net_write(ctx -> net_write_param, "AUTH", 4);
     ctx -> state = 1;
     return 0;
+}
+
+void tc_tick(struct Context *ctx) {
+    int i, j;
+
+    for(i = 0; i < MAX_VMS; i++) {
+        if(ctx -> vms[i]) {
+            if(tc_vm_execute_once(ctx -> vms[i]) != 0) { // VM halted
+#ifdef DEBUG
+                printf("VM execution done\n");
+                printf("Registers:\n");
+                for(j = 0; j < 16; j++) {
+                    printf("Register %d: %d\n", j, ctx -> vms[i] -> regs[j]);
+                }
+#endif
+                struct CodeExecResponse resp;
+                memcpy(resp.regs, ctx -> vms[i] -> regs, sizeof(u16) * 16);
+                u32 task_id = ctx -> vms[i] -> task_id;
+
+                tc_vm_destroy(ctx -> vms[i]);
+                ctx -> free((char *) ctx -> vms[i]);
+                ctx -> vms[i] = NULL;
+
+                send_data_packet(ctx, task_id, DATA_CODE_EXEC, (char *) &resp, sizeof(struct CodeExecResponse));
+            }
+        }
+    }
 }
 
 int tc_input(struct Context *ctx, char *raw_packet, size_t len) {
@@ -170,12 +217,14 @@ int tc_input(struct Context *ctx, char *raw_packet, size_t len) {
             return -1;
         }
         ctx -> state = 3;
+        ctx -> alive_count++;
         return 0;
     }
 
     if(len == 5) {
         if(strncmp(raw_packet, "ALIVE", 5) == 0) {
             ctx -> net_write(ctx -> net_write_param, "OK", 2);
+            ctx -> alive_count++;
             return 0;
         }
     }
