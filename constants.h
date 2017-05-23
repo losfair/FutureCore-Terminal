@@ -7,6 +7,23 @@
 #define DATA_GPIO_READ 0x01
 #define DATA_CODE_EXEC 0x03
 
+#define VMM_READ 1
+#define VMM_WRITE 2
+#define VMM_EXEC 4
+
+#define VME_ACCESS_VIOLATION 1
+
+#define VMA_16 0
+#define VMA_32 1
+#define VMA_16_CODE_BEGIN 0
+#define VMA_16_CODE_END 16384
+#define VMA_16_STACK_BEGIN 16384
+#define VMA_16_STACK_END 65536
+#define VMA_32_CODE_BEGIN 0x08000000
+#define VMA_32_CODE_END 0x10000000
+#define VMA_32_STACK_BEGIN 0x20000000
+#define VMA_32_STACK_END 0x28000000
+
 #ifndef MAX_VMS
 #define MAX_VMS 16
 #endif

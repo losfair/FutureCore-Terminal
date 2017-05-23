@@ -27,7 +27,7 @@ struct __attribute__((aligned(4))) GPIOReadResponse {
 };
 
 struct __attribute__((aligned(4))) CodeExecResponse {
-    u16 regs[16];
+    u32 regs[16];
 };
 
 struct Context {
@@ -52,11 +52,22 @@ struct Context {
 struct VM {
     struct Context *ctx;
     u32 task_id;
-    
-    size_t mem_size;
-    u16 regs[16];
-    u8 *mem;
-    u8 *ip;
+    u8 mode;
+    u8 error;
+
+    u32 code_begin;
+    u32 code_end;
+    u32 stack_begin;
+    u32 stack_end;
+
+    size_t code_size;
+    size_t stack_size;
+    u32 regs[16];
+
+    u8 *code;
+    u8 *stack;
+    //u8 *mem;
+    u32 ip;
 };
 
 #endif

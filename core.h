@@ -112,7 +112,7 @@ static int control_code_exec(struct Context *ctx, u32 id, char **raw_packet_ptr,
         return -1;
     }
 
-    memcpy(vm -> mem, code, code_len);
+    memcpy(vm -> code, code, code_len);
 
 #ifdef DEBUG
     printf("Executing VM\n");
@@ -172,27 +172,31 @@ int tc_start(struct Context *ctx) {
 }
 
 void tc_tick(struct Context *ctx) {
-    int i, j;
+    int i, j, k;
 
     for(i = 0; i < MAX_VMS; i++) {
         if(ctx -> vms[i]) {
-            if(tc_vm_execute_once(ctx -> vms[i]) != 0) { // VM halted
+            for(j = 0; j < 128; j++) {
+                if(tc_vm_execute_once(ctx -> vms[i]) != 0) { // VM halted
 #ifdef DEBUG
-                printf("VM execution done\n");
-                printf("Registers:\n");
-                for(j = 0; j < 16; j++) {
-                    printf("Register %d: %d\n", j, ctx -> vms[i] -> regs[j]);
-                }
+                    printf("VM execution done\n");
+                    printf("Registers:\n");
+                    for(k = 0; k < 16; k++) {
+                        printf("Register %d: %d\n", k, ctx -> vms[i] -> regs[k]);
+                    }
+                    printf("Error code: %d\n", ctx -> vms[i] -> error);
 #endif
-                struct CodeExecResponse resp;
-                memcpy(resp.regs, ctx -> vms[i] -> regs, sizeof(u16) * 16);
-                u32 task_id = ctx -> vms[i] -> task_id;
+                    struct CodeExecResponse resp;
+                    memcpy(resp.regs, ctx -> vms[i] -> regs, sizeof(u16) * 16);
+                    u32 task_id = ctx -> vms[i] -> task_id;
 
-                tc_vm_destroy(ctx -> vms[i]);
-                ctx -> free((char *) ctx -> vms[i]);
-                ctx -> vms[i] = NULL;
+                    tc_vm_destroy(ctx -> vms[i]);
+                    ctx -> free((char *) ctx -> vms[i]);
+                    ctx -> vms[i] = NULL;
 
-                send_data_packet(ctx, task_id, DATA_CODE_EXEC, (char *) &resp, sizeof(struct CodeExecResponse));
+                    send_data_packet(ctx, task_id, DATA_CODE_EXEC, (char *) &resp, sizeof(struct CodeExecResponse));
+                    break;
+                }
             }
         }
     }
