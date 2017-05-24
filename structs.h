@@ -36,6 +36,8 @@ struct Context {
 
     u32 alive_count;
 
+    hypercall_tick_fn hypercalls[256];
+
     struct VM *vms[MAX_VMS];
 
     malloc_fn malloc;
@@ -68,6 +70,10 @@ struct VM {
     u8 *stack;
     //u8 *mem;
     u32 ip;
+    u32 sp;
+
+    hypercall_tick_fn hypercall_tick;
+    char *hypercall_state;
 };
 
 #endif

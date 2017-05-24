@@ -21,6 +21,18 @@
 #define VMI_JMP 0x10
 #define VMI_CONDJMP 0x11
 #define VMI_LOADVAL 0x12
+#define VMI_PUSH 0x13
+#define VMI_PUSH8 0x14
+#define VMI_PUSH16 0x15
+#define VMI_PUSH32 0x16
+#define VMI_POP 0x17
+#define VMI_POP8 0x18
+#define VMI_POP16 0x19
+#define VMI_POP32 0x1a
+#define VMI_ENTER32 0x1b
+#define VMI_ENTER16 0x1c
+
+#define VMI_HYPERCALL 0xfe
 #define VMI_HALT 0xff
 
 #define VMI_GPIO_DIGITAL_READ 0x80

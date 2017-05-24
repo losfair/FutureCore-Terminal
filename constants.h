@@ -12,6 +12,7 @@
 #define VMM_EXEC 4
 
 #define VME_ACCESS_VIOLATION 1
+#define VME_INVALID_HYPERCALL 2
 
 #define VMA_16 0
 #define VMA_32 1
@@ -26,6 +27,10 @@
 
 #ifndef MAX_VMS
 #define MAX_VMS 16
+#endif
+
+#ifndef VM_STACK_SIZE
+#define VM_STACK_SIZE 128
 #endif
 
 #endif

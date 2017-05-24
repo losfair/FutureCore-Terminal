@@ -146,6 +146,10 @@ void tc_init(struct Context *ctx) {
     for(i = 0; i < MAX_VMS; i++) {
         ctx -> vms[i] = NULL;
     }
+
+    for(i = 0; i < 256; i++) {
+        ctx -> hypercalls[i] = NULL;
+    }
 }
 
 void tc_reset(struct Context *ctx) {
@@ -182,7 +186,7 @@ void tc_tick(struct Context *ctx) {
                     printf("VM execution done\n");
                     printf("Registers:\n");
                     for(k = 0; k < 16; k++) {
-                        printf("Register %d: %d\n", k, ctx -> vms[i] -> regs[k]);
+                        printf("Register %d: %u\n", k, ctx -> vms[i] -> regs[k]);
                     }
                     printf("Error code: %d\n", ctx -> vms[i] -> error);
 #endif
