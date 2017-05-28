@@ -7,11 +7,13 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include "credentials.h"
 #include "types.h"
 #include "structs.h"
 #include "constants.h"
 #include "md5.h"
 #include "vm.h"
+#include "security.h"
 
 /*static void memcpy(char *dest, char *src, size_t len) {
     int i;
@@ -21,16 +23,20 @@
     }
 }*/
 
-static int send_data_packet(struct Context *ctx, u32 id, u32 type, char *data, size_t len) {
+static int send_data_packet(struct Context *ctx, u32 id, u32 type, const u8 *data, size_t len) {
+    if(type == 0) {
+        size_t enc_buf_len = len + 8;
+        u8 *enc_buf = (u8 *) ctx -> malloc(enc_buf_len);
 
-#ifdef TC_NO_DYNAMIC_MEMORY
-    static char buf[sizeof(struct DataPacket) + 1024];
-    if(len > 1024) {
-        return -1;
+        tc_encrypt_and_sign(ctx, enc_buf, enc_buf_len, data, len);
+        int ret = ctx -> net_write(ctx -> net_write_param, (const char *) enc_buf, enc_buf_len);
+
+        ctx -> free((char *) enc_buf);
+
+        return ret;
     }
-#else
-    char *buf = ctx -> malloc(sizeof(struct DataPacket) + len);
-#endif
+
+    u8 *buf = (u8 *) ctx -> malloc(sizeof(struct DataPacket) + len);
 
     struct DataPacket header;
     header.id = id;
@@ -39,11 +45,15 @@ static int send_data_packet(struct Context *ctx, u32 id, u32 type, char *data, s
     memcpy(buf, (char *)&header, sizeof(struct DataPacket));
     memcpy(buf + sizeof(struct DataPacket), data, len);
 
-    int ret = ctx -> net_write(ctx -> net_write_param, buf, sizeof(struct DataPacket) + len);
+    size_t enc_buf_len = sizeof(struct DataPacket) + len + 8;
+    u8 *enc_buf = (u8 *) ctx -> malloc(enc_buf_len);
+    tc_encrypt_and_sign(ctx, enc_buf, enc_buf_len, buf, sizeof(struct DataPacket) + len);
 
-#ifndef TC_NO_DYNAMIC_MEMORY
-    ctx -> free(buf);
-#endif
+    ctx -> free((char *) buf);
+
+    int ret = ctx -> net_write(ctx -> net_write_param, (const char *) enc_buf, enc_buf_len);
+
+    ctx -> free((char *) enc_buf);
 
     return ret;
 }
@@ -62,7 +72,7 @@ static struct VM * get_vm(struct Context *ctx, size_t code_len) {
     return NULL;
 }
 
-static int control_gpio_read(struct Context *ctx, u32 id, char **raw_packet_ptr, size_t *len_ptr) {
+static int control_gpio_read(struct Context *ctx, u32 id, u8 **raw_packet_ptr, size_t *len_ptr) {
     size_t len = *len_ptr;
 
     if(len < sizeof(struct GPIOReadRequest)) {
@@ -77,12 +87,12 @@ static int control_gpio_read(struct Context *ctx, u32 id, char **raw_packet_ptr,
     struct GPIOReadResponse resp;
     resp.val = ctx -> gpio_read(req -> pin);
 
-    send_data_packet(ctx, id, DATA_GPIO_READ, (char *) &resp, sizeof(struct GPIOReadResponse));
+    send_data_packet(ctx, id, DATA_GPIO_READ, (u8 *) &resp, sizeof(struct GPIOReadResponse));
 
     return 0;
 }
 
-static int control_code_exec(struct Context *ctx, u32 id, char **raw_packet_ptr, size_t *len_ptr) {
+static int control_code_exec(struct Context *ctx, u32 id, u8 **raw_packet_ptr, size_t *len_ptr) {
     int i;
     size_t len = *len_ptr;
 
@@ -134,9 +144,15 @@ void tc_init(struct Context *ctx) {
 
     ctx -> state = 0;
     ctx -> key = NULL;
+
+    ctx -> terminal_id = TC_CRED_TERMINAL_ID;
+    ctx -> signing_key = TC_CRED_SIGNING_KEY;
+    ctx -> encryption_key = TC_CRED_ENCRYPTION_KEY;
+
     ctx -> alive_count = 0;
     ctx -> malloc = (malloc_fn) malloc;
     ctx -> free = (free_fn) free;
+    ctx -> secure_random = NULL;
     ctx -> gpio_read = NULL;
     ctx -> gpio_write = NULL;
     ctx -> gpio_set_pin_mode = NULL;
@@ -150,6 +166,8 @@ void tc_init(struct Context *ctx) {
     for(i = 0; i < 256; i++) {
         ctx -> hypercalls[i] = NULL;
     }
+
+    tc_init_keys(ctx);
 }
 
 void tc_reset(struct Context *ctx) {
@@ -170,7 +188,12 @@ int tc_start(struct Context *ctx) {
     if(ctx -> state != 0) {
         return -1;
     }
-    ctx -> net_write(ctx -> net_write_param, "AUTH", 4);
+
+    char auth_req[40]; // "AUTH"(4) + terminal_id(36)
+    memcpy(auth_req, "AUTH", 4);
+    memcpy(auth_req + 4, TC_CRED_TERMINAL_ID, 36);
+
+    ctx -> net_write(ctx -> net_write_param, auth_req, 40);
     ctx -> state = 1;
     return 0;
 }
@@ -198,7 +221,7 @@ void tc_tick(struct Context *ctx) {
                     ctx -> free((char *) ctx -> vms[i]);
                     ctx -> vms[i] = NULL;
 
-                    send_data_packet(ctx, task_id, DATA_CODE_EXEC, (char *) &resp, sizeof(struct CodeExecResponse));
+                    send_data_packet(ctx, task_id, DATA_CODE_EXEC, (u8 *) &resp, sizeof(struct CodeExecResponse));
                     break;
                 }
             }
@@ -206,22 +229,35 @@ void tc_tick(struct Context *ctx) {
     }
 }
 
-int tc_input(struct Context *ctx, char *raw_packet, size_t len) {
+int tc_input(struct Context *ctx, u8 *enc_raw_packet, size_t _len) {
+    u8 _raw_packet[2200];
+    u8 *raw_packet = _raw_packet;
+    int ilen = tc_verify_and_decrypt(ctx, raw_packet, 2200, enc_raw_packet, _len);
+    if(ilen < 0) {
+#ifdef DEBUG
+        printf("tc_input: tc_verify_and_decrypt failed: %d\n", ilen);
+#endif
+        return -1;
+    }
+    size_t len = ilen;
+
     if(ctx -> state == 1) {
         if(len != 32) {
             return -1;
         }
+
         MD5_CTX md5;
         md5_init(&md5);
-        md5_update(&md5, (unsigned char *) raw_packet, len);
-        char output[16];
+        md5_update(&md5, (unsigned char *) raw_packet, 32);
+        u8 output[16];
         md5_final(&md5, (unsigned char *) output);
 
-        ctx -> net_write(ctx -> net_write_param, output, 16);
+        send_data_packet(ctx, 0, 0, output, 16);
+
         ctx -> state = 2;
         return 0;
     } else if(ctx -> state == 2) {
-        if(len != 2 || strncmp(raw_packet, "OK", 2) != 0) {
+        if(len != 2 || strncmp((char *) raw_packet, "OK", 2) != 0) {
             return -1;
         }
         ctx -> state = 3;
@@ -230,8 +266,8 @@ int tc_input(struct Context *ctx, char *raw_packet, size_t len) {
     }
 
     if(len == 5) {
-        if(strncmp(raw_packet, "ALIVE", 5) == 0) {
-            ctx -> net_write(ctx -> net_write_param, "OK", 2);
+        if(strncmp((char *) raw_packet, "ALIVE", 5) == 0) {
+            send_data_packet(ctx, 0, 0, (u8 *) "OK", 2);
             ctx -> alive_count++;
             return 0;
         }

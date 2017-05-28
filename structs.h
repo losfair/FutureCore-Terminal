@@ -34,6 +34,12 @@ struct Context {
     int state;
     char *key;
 
+    const char *terminal_id;
+    const char *signing_key;
+    const char *encryption_key;
+    u8 current_key[16];
+    u8 server_key[16];
+
     u32 alive_count;
 
     hypercall_tick_fn hypercalls[256];
@@ -42,6 +48,7 @@ struct Context {
 
     malloc_fn malloc;
     free_fn free;
+    secure_random_fn secure_random;
 
     gpio_read_fn gpio_read;
     gpio_write_fn gpio_write;
