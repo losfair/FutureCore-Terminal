@@ -10,7 +10,7 @@
 #include "vm_instructions.h"
 #include "constants.h"
 
-void tc_vm_enter_32(struct VM *vm) {
+static inline void tc_vm_enter_32(struct VM *vm) {
     vm -> mode = VMA_32;
 
     vm -> ip = vm -> ip - vm -> code_begin + VMA_32_CODE_BEGIN;
@@ -22,7 +22,7 @@ void tc_vm_enter_32(struct VM *vm) {
     vm -> sp = VMA_32_STACK_BEGIN;
 }
 
-void tc_vm_enter_16(struct VM *vm) {
+static inline void tc_vm_enter_16(struct VM *vm) {
     vm -> mode = VMA_16;
 
     vm -> ip = vm -> ip - vm -> code_begin + VMA_16_CODE_BEGIN;
@@ -34,11 +34,14 @@ void tc_vm_enter_16(struct VM *vm) {
     vm -> sp = VMA_16_STACK_BEGIN;
 }
 
-void tc_vm_init(struct Context *ctx, struct VM *vm, size_t code_size) {
+void tc_vm_init(struct Context *ctx, struct VM *vm, size_t code_size, size_t max_cycles) {
     size_t i;
     vm -> ctx = ctx;
     vm -> task_id = 0;
     vm -> error = 0;
+
+    vm -> current_cycles = 0;
+    vm -> max_cycles = max_cycles;
 
     vm -> code_size = code_size;
     vm -> code = (u8 *) ctx -> malloc(code_size);
@@ -59,6 +62,8 @@ void tc_vm_init(struct Context *ctx, struct VM *vm, size_t code_size) {
     vm -> code_end = 0;
     vm -> stack_begin = 0;
     vm -> stack_end = 0;
+
+    vm -> runnable = 1;
 
     tc_vm_enter_16(vm);
 }
@@ -89,7 +94,7 @@ void tc_vm_destroy(struct VM *vm) {
     vm -> ctx = NULL;
 }
 
-u8 * tc_vm_get_real_addr(struct VM *vm, u32 vaddr, u16 flags) {
+static inline u8 * tc_vm_get_real_addr(struct VM *vm, u32 vaddr, u16 flags) {
     if(/*(((flags & VMM_EXEC) && (flags & VMM_READ)) || (flags & VMM_WRITE))
         && */vaddr >= vm -> code_begin
         && vaddr < vm -> code_end
@@ -111,12 +116,12 @@ u8 * tc_vm_get_real_addr(struct VM *vm, u32 vaddr, u16 flags) {
     }
 }
 
-u8 tc_vm_mem_read8(struct VM *vm, u32 vaddr, u16 flags) {
+static inline u8 tc_vm_mem_read8(struct VM *vm, u32 vaddr, u16 flags) {
     u8 *addr = tc_vm_get_real_addr(vm, vaddr, flags | VMM_READ);
     return addr ? *addr : 0;
 }
 
-u16 tc_vm_mem_read16(struct VM *vm, u32 vaddr, u16 flags) {
+static inline u16 tc_vm_mem_read16(struct VM *vm, u32 vaddr, u16 flags) {
     u8 *addr1 = tc_vm_get_real_addr(vm, vaddr, flags | VMM_READ);
     u8 *addr2 = tc_vm_get_real_addr(vm, vaddr + 1, flags | VMM_READ);
 
@@ -126,7 +131,7 @@ u16 tc_vm_mem_read16(struct VM *vm, u32 vaddr, u16 flags) {
     return (((u16) *addr2) << 8) | ((u16) *addr1);
 }
 
-u32 tc_vm_mem_read32(struct VM *vm, u32 vaddr, u16 flags) {
+static inline u32 tc_vm_mem_read32(struct VM *vm, u32 vaddr, u16 flags) {
     u8 *addr1 = tc_vm_get_real_addr(vm, vaddr, flags | VMM_READ);
     u8 *addr2 = tc_vm_get_real_addr(vm, vaddr + 1, flags | VMM_READ);
     u8 *addr3 = tc_vm_get_real_addr(vm, vaddr + 2, flags | VMM_READ);
@@ -145,21 +150,21 @@ u32 tc_vm_mem_read32(struct VM *vm, u32 vaddr, u16 flags) {
     return ret;
 }
 
-u32 tc_vm_mem_readuint(struct VM *vm, u32 vaddr, u16 flags) {
+static inline u32 tc_vm_mem_readuint(struct VM *vm, u32 vaddr, u16 flags) {
     if(vm -> mode == VMA_16) {
         return tc_vm_mem_read16(vm, vaddr, flags);
     }
     return tc_vm_mem_read32(vm, vaddr, flags);
 }
 
-void tc_vm_mem_write8(struct VM *vm, u32 vaddr, u8 val, u16 flags) {
+static inline void tc_vm_mem_write8(struct VM *vm, u32 vaddr, u8 val, u16 flags) {
     u8 *addr = tc_vm_get_real_addr(vm, vaddr, flags | VMM_WRITE);
     if(addr) {
         *addr = val;
     }
 }
 
-void tc_vm_mem_write16(struct VM *vm, u32 vaddr, u16 val, u16 flags) {
+static inline void tc_vm_mem_write16(struct VM *vm, u32 vaddr, u16 val, u16 flags) {
     u8 *addr1 = tc_vm_get_real_addr(vm, vaddr, flags | VMM_WRITE);
     u8 *addr2 = tc_vm_get_real_addr(vm, vaddr + 1, flags | VMM_WRITE);
 
@@ -171,7 +176,7 @@ void tc_vm_mem_write16(struct VM *vm, u32 vaddr, u16 val, u16 flags) {
     *addr2 = val >> 8;
 }
 
-void tc_vm_mem_write32(struct VM *vm, u32 vaddr, u32 val, u16 flags) {
+static inline void tc_vm_mem_write32(struct VM *vm, u32 vaddr, u32 val, u16 flags) {
     u8 *addr1 = tc_vm_get_real_addr(vm, vaddr, flags | VMM_WRITE);
     u8 *addr2 = tc_vm_get_real_addr(vm, vaddr + 1, flags | VMM_WRITE);
     u8 *addr3 = tc_vm_get_real_addr(vm, vaddr + 2, flags | VMM_WRITE);
@@ -187,25 +192,25 @@ void tc_vm_mem_write32(struct VM *vm, u32 vaddr, u32 val, u16 flags) {
     *addr4 = val >> 24;
 }
 
-void tc_vm_mem_writeuint(struct VM *vm, u32 vaddr, u32 val, u16 flags) {
+static inline void tc_vm_mem_writeuint(struct VM *vm, u32 vaddr, u32 val, u16 flags) {
     if(vm -> mode == VMA_16) {
         tc_vm_mem_write16(vm, vaddr, val, flags);
     }
     tc_vm_mem_write32(vm, vaddr, val, flags);
 }
 
-u8 tc_vm_iread8(struct VM *vm) {
+static inline u8 tc_vm_iread8(struct VM *vm) {
     return tc_vm_mem_read8(vm, vm -> ip++, VMM_EXEC);
 }
 
-u16 tc_vm_iread16(struct VM *vm) {
+static inline u16 tc_vm_iread16(struct VM *vm) {
     u16 ret = 0;
     ret |= tc_vm_iread8(vm);
     ret |= tc_vm_iread8(vm) << 8;
     return ret;
 }
 
-u32 tc_vm_iread32(struct VM *vm) {
+static inline u32 tc_vm_iread32(struct VM *vm) {
     u32 ret = 0;
     ret |= tc_vm_iread8(vm);
     ret |= tc_vm_iread8(vm) << 8;
@@ -214,29 +219,29 @@ u32 tc_vm_iread32(struct VM *vm) {
     return ret;
 }
 
-u32 tc_vm_ireaduint(struct VM *vm) {
+static inline u32 tc_vm_ireaduint(struct VM *vm) {
     if(vm -> mode == VMA_16) {
         return tc_vm_iread16(vm);
     }
     return tc_vm_iread32(vm);
 }
 
-void tc_vm_stack_push8(struct VM *vm, u8 val) {
+static inline void tc_vm_stack_push8(struct VM *vm, u8 val) {
     tc_vm_mem_write8(vm, vm -> sp, val, VMM_WRITE);
     vm -> sp++;
 }
 
-void tc_vm_stack_push16(struct VM *vm, u16 val) {
+static inline void tc_vm_stack_push16(struct VM *vm, u16 val) {
     tc_vm_mem_write16(vm, vm -> sp, val, VMM_WRITE);
     vm -> sp += 2;
 }
 
-void tc_vm_stack_push32(struct VM *vm, u32 val) {
+static inline void tc_vm_stack_push32(struct VM *vm, u32 val) {
     tc_vm_mem_write32(vm, vm -> sp, val, VMM_WRITE);
     vm -> sp += 4;
 }
 
-void tc_vm_stack_pushuint(struct VM *vm, u32 val) {
+static inline void tc_vm_stack_pushuint(struct VM *vm, u32 val) {
     if(vm -> mode == VMA_16) {
         tc_vm_stack_push16(vm, val);
     } else {
@@ -244,40 +249,40 @@ void tc_vm_stack_pushuint(struct VM *vm, u32 val) {
     }
 }
 
-u8 tc_vm_stack_pop8(struct VM *vm) {
+static inline u8 tc_vm_stack_pop8(struct VM *vm) {
     vm -> sp--;
     return tc_vm_mem_read8(vm, vm -> sp, VMM_READ);
 }
 
-u16 tc_vm_stack_pop16(struct VM *vm) {
+static inline u16 tc_vm_stack_pop16(struct VM *vm) {
     vm -> sp -= 2;
     return tc_vm_mem_read16(vm, vm -> sp, VMM_READ);
 }
 
-u32 tc_vm_stack_pop32(struct VM *vm) {
+static inline u32 tc_vm_stack_pop32(struct VM *vm) {
     vm -> sp -= 4;
     return tc_vm_mem_read32(vm, vm -> sp, VMM_READ);
 }
 
-u32 tc_vm_stack_popuint(struct VM *vm) {
+static inline u32 tc_vm_stack_popuint(struct VM *vm) {
     if(vm -> mode == VMA_16) {
         return tc_vm_stack_pop16(vm);
     }
     return tc_vm_stack_pop32(vm);
 }
 
-u32 tc_vm_reg_read(struct VM *vm, u8 id) {
+static inline u32 tc_vm_reg_read(struct VM *vm, u8 id) {
     return vm -> regs[id & 0xf];
 }
 
-void tc_vm_reg_write(struct VM *vm, u8 id, u32 val) {
+static inline void tc_vm_reg_write(struct VM *vm, u8 id, u32 val) {
     vm -> regs[id & 0xf] = val;
 #ifdef DEBUG
     printf("reg_write %d: %u\n", (int) id, val);
 #endif
 }
 
-void tc_vm_do_hypercall(struct VM *vm, u8 id) {
+static inline void tc_vm_do_hypercall(struct VM *vm, u8 id) {
     hypercall_tick_fn fn = vm -> ctx -> hypercalls[id];
     if(!fn) {
         vm -> error = VME_INVALID_HYPERCALL;
@@ -290,7 +295,7 @@ void tc_vm_do_hypercall(struct VM *vm, u8 id) {
     vm -> hypercall_tick = fn;
 }
 
-void tc_vm_hypercall_tick(struct VM *vm) {
+static inline void tc_vm_hypercall_tick(struct VM *vm) {
     u8 ret = vm -> hypercall_tick(vm); // vm -> hypercall_tick is assumed not to be null.
     if(ret) {
 #ifdef DEBUG
@@ -309,6 +314,11 @@ u8 tc_vm_execute_once(struct VM *vm) {
     if(vm -> hypercall_tick) {
         tc_vm_hypercall_tick(vm);
         return 0;
+    }
+
+    vm -> current_cycles++;
+    if(vm -> max_cycles && vm -> current_cycles > vm -> max_cycles) { // check cycle count after Hypercall tick to avoid memory leak
+        return 1;
     }
 
     u8 ins = tc_vm_iread8(vm);
@@ -502,7 +512,7 @@ u8 tc_vm_execute_once(struct VM *vm) {
             break;
         
         default:
-            tc_vm_reset(vm);
+            return 1;
     }
 
     return 0;

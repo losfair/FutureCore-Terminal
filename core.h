@@ -58,13 +58,13 @@ static int send_data_packet(struct Context *ctx, u32 id, u32 type, const u8 *dat
     return ret;
 }
 
-static struct VM * get_vm(struct Context *ctx, size_t code_len) {
+static struct VM * get_vm(struct Context *ctx, size_t code_len, size_t max_cycles) {
     int i;
 
     for(i = 0; i < MAX_VMS; i++) {
         if(ctx -> vms[i] == NULL) {
             ctx -> vms[i] = (struct VM *) ctx -> malloc(sizeof(struct VM));
-            tc_vm_init(ctx, ctx -> vms[i], code_len);
+            tc_vm_init(ctx, ctx -> vms[i], code_len, max_cycles);
             return ctx -> vms[i];
         }
     }
@@ -117,7 +117,7 @@ static int control_code_exec(struct Context *ctx, u32 id, u8 **raw_packet_ptr, s
     *raw_packet_ptr += code_len;
     len = *len_ptr;
 
-    struct VM *vm = get_vm(ctx, code_len);
+    struct VM *vm = get_vm(ctx, code_len, req -> max_cycles);
     if(!vm) {
         return -1;
     }
@@ -135,6 +135,22 @@ static int control_code_exec(struct Context *ctx, u32 id, u8 **raw_packet_ptr, s
 #endif
 
     vm -> task_id = id;
+
+    return 0;
+}
+
+static int control_get_device_status(struct Context *ctx, u32 id, u8 **raw_packet_ptr, size_t *len_ptr) {
+    int i;
+
+    struct GetDeviceStatusResponse resp;
+    resp.max_vms = MAX_VMS;
+    resp.running_vms = 0;
+
+    for(i = 0; i < MAX_VMS; i++) {
+        if(ctx -> vms[i]) resp.running_vms++;
+    }
+
+    send_data_packet(ctx, id, DATA_GET_DEVICE_STATUS, (u8 *)&resp, sizeof(struct GetDeviceStatusResponse));
 
     return 0;
 }
@@ -198,30 +214,48 @@ int tc_start(struct Context *ctx) {
     return 0;
 }
 
+int tc_can_sleep(struct Context *ctx) {
+    int i;
+
+    for(i = 0; i < MAX_VMS; i++) {
+        if(ctx -> vms[i] && ctx -> vms[i] -> runnable) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
 void tc_tick(struct Context *ctx) {
     int i, j, k;
 
     for(i = 0; i < MAX_VMS; i++) {
-        if(ctx -> vms[i]) {
-            for(j = 0; j < 128; j++) {
-                if(tc_vm_execute_once(ctx -> vms[i]) != 0) { // VM halted
+        struct VM *vm = ctx -> vms[i];
+
+        if(vm && vm -> runnable) {
+            for(j = 0; j < CYCLES_PER_TICK; j++) {
+                if(tc_vm_execute_once(vm) != 0) { // VM halted
 #ifdef DEBUG
                     printf("VM execution done\n");
                     printf("Registers:\n");
                     for(k = 0; k < 16; k++) {
-                        printf("Register %d: %u\n", k, ctx -> vms[i] -> regs[k]);
+                        printf("Register %d: %u\n", k, vm -> regs[k]);
                     }
-                    printf("Error code: %d\n", ctx -> vms[i] -> error);
+                    printf("Error code: %d\n", vm -> error);
 #endif
                     struct CodeExecResponse resp;
-                    memcpy(resp.regs, ctx -> vms[i] -> regs, sizeof(u16) * 16);
-                    u32 task_id = ctx -> vms[i] -> task_id;
+                    memcpy(resp.regs, vm -> regs, sizeof(u16) * 16);
+                    u32 task_id = vm -> task_id;
 
-                    tc_vm_destroy(ctx -> vms[i]);
-                    ctx -> free((char *) ctx -> vms[i]);
+                    tc_vm_destroy(vm);
+                    ctx -> free((char *) vm);
+                    vm = NULL;
                     ctx -> vms[i] = NULL;
 
                     send_data_packet(ctx, task_id, DATA_CODE_EXEC, (u8 *) &resp, sizeof(struct CodeExecResponse));
+                    break;
+                }
+                if(!vm -> runnable) {
                     break;
                 }
             }
@@ -288,6 +322,10 @@ int tc_input(struct Context *ctx, u8 *enc_raw_packet, size_t _len) {
 
         case CONTROL_CODE_EXEC: {
             return control_code_exec(ctx, pkt -> id, &raw_packet, &len);
+        }
+
+        case CONTROL_GET_DEVICE_STATUS: {
+            return control_get_device_status(ctx, pkt -> id, &raw_packet, &len);
         }
 
         default:

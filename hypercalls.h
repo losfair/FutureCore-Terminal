@@ -6,5 +6,7 @@
 #define HC_IO_SET_PIN_MODE 0x03
 #define HC_IO_ANALOG_READ 0x04
 #define HC_IO_ANALOG_WRITE 0x05
+#define HC_DEVICE_RESET 0x06
+#define HC_DEVICE_CLOCK_READ 0x07
 
 #endif

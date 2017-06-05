@@ -15,6 +15,7 @@ struct __attribute__((aligned(4))) GPIOReadRequest {
 
 struct __attribute__((aligned(4))) CodeExecRequest {
     u32 len;
+    u32 max_cycles;
 };
 
 struct __attribute__((aligned(4))) DataPacket {
@@ -28,6 +29,11 @@ struct __attribute__((aligned(4))) GPIOReadResponse {
 
 struct __attribute__((aligned(4))) CodeExecResponse {
     u32 regs[16];
+};
+
+struct __attribute__((aligned(4))) GetDeviceStatusResponse {
+    u16 running_vms;
+    u16 max_vms;
 };
 
 struct Context {
@@ -69,6 +75,9 @@ struct VM {
     u32 stack_begin;
     u32 stack_end;
 
+    u32 current_cycles;
+    u32 max_cycles;
+
     size_t code_size;
     size_t stack_size;
     u32 regs[16];
@@ -78,6 +87,8 @@ struct VM {
     //u8 *mem;
     u32 ip;
     u32 sp;
+
+    u8 runnable;
 
     hypercall_tick_fn hypercall_tick;
     char *hypercall_state;
