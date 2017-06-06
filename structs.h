@@ -33,7 +33,12 @@ struct __attribute__((aligned(4))) CodeExecResponse {
 
 struct __attribute__((aligned(4))) GetDeviceStatusResponse {
     u16 running_vms;
+    u16 active_vms;
     u16 max_vms;
+};
+
+struct __attribute__((aligned(4))) ResetVMsResponse {
+    u16 affected_vms;
 };
 
 struct Context {

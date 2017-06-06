@@ -78,22 +78,6 @@ void tc_vm_reset(struct VM *vm) {
     }
 }
 
-void tc_vm_destroy(struct VM *vm) {
-    vm -> ctx -> free((char *) vm -> code);
-    vm -> code = NULL;
-    vm -> code_size = 0;
-
-    if(vm -> stack) {
-        vm -> ctx -> free((char *) vm -> stack);
-        vm -> stack = NULL;
-        vm -> stack_size = 0;
-    }
-
-    vm -> ip = 0;
-
-    vm -> ctx = NULL;
-}
-
 static inline u8 * tc_vm_get_real_addr(struct VM *vm, u32 vaddr, u16 flags) {
     if(/*(((flags & VMM_EXEC) && (flags & VMM_READ)) || (flags & VMM_WRITE))
         && */vaddr >= vm -> code_begin
@@ -306,6 +290,24 @@ static inline void tc_vm_hypercall_tick(struct VM *vm) {
         vm -> hypercall_tick = NULL;
         vm -> hypercall_state = NULL;
     }
+}
+
+void tc_vm_destroy(struct VM *vm) {
+    while(vm -> hypercall_tick) tc_vm_hypercall_tick(vm); // Finish the current hypercall to avoid memory leak
+
+    vm -> ctx -> free((char *) vm -> code);
+    vm -> code = NULL;
+    vm -> code_size = 0;
+
+    if(vm -> stack) {
+        vm -> ctx -> free((char *) vm -> stack);
+        vm -> stack = NULL;
+        vm -> stack_size = 0;
+    }
+
+    vm -> ip = 0;
+
+    vm -> ctx = NULL;
 }
 
 u8 tc_vm_execute_once(struct VM *vm) {

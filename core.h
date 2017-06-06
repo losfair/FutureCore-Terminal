@@ -145,9 +145,15 @@ static int control_get_device_status(struct Context *ctx, u32 id, u8 **raw_packe
     struct GetDeviceStatusResponse resp;
     resp.max_vms = MAX_VMS;
     resp.running_vms = 0;
+    resp.active_vms = 0;
 
     for(i = 0; i < MAX_VMS; i++) {
-        if(ctx -> vms[i]) resp.running_vms++;
+        if(ctx -> vms[i]) {
+            resp.running_vms++;
+            if(ctx -> vms[i] -> runnable) {
+                resp.active_vms++;
+            }
+        }
     }
 
     send_data_packet(ctx, id, DATA_GET_DEVICE_STATUS, (u8 *)&resp, sizeof(struct GetDeviceStatusResponse));
@@ -186,7 +192,7 @@ void tc_init(struct Context *ctx) {
     tc_init_keys(ctx);
 }
 
-void tc_reset(struct Context *ctx) {
+void tc_reset_vms(struct Context *ctx) {
     int i;
 
     for(i = 0; i < MAX_VMS; i++) {
@@ -196,7 +202,10 @@ void tc_reset(struct Context *ctx) {
             ctx -> vms[i] = NULL;
         }
     }
+}
 
+void tc_reset(struct Context *ctx) {
+    tc_reset_vms(ctx);
     tc_init(ctx);
 }
 
@@ -224,6 +233,23 @@ int tc_can_sleep(struct Context *ctx) {
     }
 
     return 1;
+}
+
+static int control_reset_vms(struct Context *ctx, u32 id, u8 **raw_packet_ptr, size_t *len_ptr) {
+    int i;
+    struct ResetVMsResponse resp;
+    resp.affected_vms = 0;
+
+    for(i = 0; i < MAX_VMS; i++) {
+        if(ctx -> vms[i]) {
+            resp.affected_vms++;
+        }
+    }
+
+    tc_reset_vms(ctx);
+
+    send_data_packet(ctx, id, DATA_RESET_VMS, (u8 *)&resp, sizeof(struct ResetVMsResponse));
+    return 0;
 }
 
 void tc_tick(struct Context *ctx) {
@@ -326,6 +352,10 @@ int tc_input(struct Context *ctx, u8 *enc_raw_packet, size_t _len) {
 
         case CONTROL_GET_DEVICE_STATUS: {
             return control_get_device_status(ctx, pkt -> id, &raw_packet, &len);
+        }
+
+        case CONTROL_RESET_VMS: {
+            return control_reset_vms(ctx, pkt -> id, &raw_packet, &len);
         }
 
         default:
